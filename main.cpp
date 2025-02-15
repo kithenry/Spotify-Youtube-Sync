@@ -16,20 +16,37 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb,
   return total_size;
 }
 
-size_t refreshToken() {
-  // for getting new access token
+bool isFileEmpty(const std::string &filename) {
+  std::ifstream file(filename, std::ios::ate);
+  return file.tellg() == 0;
 }
 
-int main() {
-  // Define the necessary strings using std::string for better handling
-  std::string client_id = "164350196968-vjf45qp8u8htdmfud7dsj4gch0tv4t9m.apps."
-                          "googleusercontent.com";
-  std::string client_secret = "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";
-  std::string base_url = "https://accounts.google.com/o/oauth2/v2/auth?";
-  std::string redirect_uri = "http://localhost";
-  std::string scope = "https://www.googleapis.com/auth/youtube.readonly";
+int storeFetchedData(json dataToStore) {
+  std::ofstream file("storedData.json");
 
-  // Build the request URL by concatenating the necessary components
+  if (!file) {
+    std::cerr << "Error opening file for writing!" << std::endl;
+    return 1;
+  }
+
+  file << dataToStore.dump(4);
+  file.close();
+  return 0;
+}
+
+std::string refreshToken() {
+  // for getting new access token
+  // after gettting new access token, update storedData file with new data
+}
+
+json fetchStoredData() {
+  // for accessing stored tokens and expiry time if any
+}
+
+std::string fetchAccessCode(std::string client_id, std::string base_url,
+                            std::string redirect_uri, std::string scope) {
+  // for getting access code, then later on access token, refresh token and
+  // expiry time Build the request URL by concatenating the necessary components
   std::string request_url = base_url +
                             "response_type=code&client_id=" + client_id +
                             "&redirect_uri=" + redirect_uri + "&scope=" + scope;
@@ -49,15 +66,19 @@ int main() {
   std::cin >> access_code;
   std::cout << access_code << " is the code you received!" << std::endl;
   // getting the access token and refresh token
+  return access_code;
+}
 
+std::string fetchAccessTokens(std::string post_url, std::string content_type,
+                              std::string client_id, std::string client_secret,
+                              std::string access_code,
+                              std::string redirect_uri) {
   CURL *curl = curl_easy_init();
   if (!curl) {
     std::cerr << "Failed to initialize cURL!" << std::endl;
     return 0;
   }
 
-  std::string post_url = "https://oauth2.googleapis.com/token";
-  std::string content_type = "application/x-www-form-urlencoded";
   std::string post_fields =
       "client_id=" + client_id + "&client_secret=" + client_secret +
       "&code=" + access_code + "&grant_type=authorization_code" +
@@ -83,15 +104,11 @@ int main() {
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
-  json jsonResponse = json::parse(response_data);
-  std::cout << "This is how the parsed json string looks: \n " << jsonResponse
-            << std::endl;
-  std::cout << "Access Token: " << jsonResponse["access_token"]
-            << "\nRefresh Token: " << jsonResponse["refresh_token"]
-            << "\nScope: " << jsonResponse["scope"]
-            << "\nExpires in: " << jsonResponse["expires_in"] << "seconds"
-            << std::endl;
 
+  return response_data;
+}
+
+int processJsonData(json jsonResponse) {
   std::string access_token = jsonResponse["access_token"];
   std::string refresh_token = jsonResponse["refresh_token"];
   int expires_in = jsonResponse["expires_in"];
@@ -99,20 +116,53 @@ int main() {
   auto now = std::chrono::system_clock::now();
   auto future_time = now + std::chrono::seconds(expires_in);
 
-  json storedData;
-  storedData["expiry_time"] = std::chrono::system_clock::to_time_t(future_time);
-  storedData["refresh_token"] = refresh_token;
-  storedData["access_token"] = access_token;
+  json jsonData;
+  jsonData["expiry_time"] = std::chrono::system_clock::to_time_t(future_time);
+  jsonData["refresh_token"] = refresh_token;
+  jsonData["access_token"] = access_token;
 
-  std::ofstream file("storedData.json");
+  return storeFetchedData(jsonData);
+}
 
-  if (!file) {
-    std::cerr << "Error opening file for writing!" << std::endl;
-    return 1;
+std::string getPlayLists(std::string client_id, std::string client_secret,
+                         std::string access_token) {
+  // code goes here
+}
+
+int main() {
+  // Define the necessary strings using std::string for better handling
+  std::string client_id = "164350196968-vjf45qp8u8htdmfud7dsj4gch0tv4t9m.apps."
+                          "googleusercontent.com";
+  std::string client_secret = "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";
+  std::string base_url = "https://accounts.google.com/o/oauth2/v2/auth?";
+  std::string redirect_uri = "http://localhost";
+  std::string scope = "https://www.googleapis.com/auth/youtube.readonly";
+  std::string storedDataFile = "storedData.txt";
+  if (!isFileEmpty(storedDataFile)) {
+    // fetch access_token and refresh_token and expiry time
+    // check if access_token is expired
+    // if it is, refresh it then move on to use it, if not, move on to use it.
+  } else {
+    // get access code, then access token and refresh token and exp time
+    // store tokens and expiry time
+    std::string access_code =
+        fetchAccessCode(client_id, base_url, redirect_uri, scope);
+    std::string post_url = "https://oauth2.googleapis.com/token";
+    std::string content_type = "application/x-www-form-urlencoded";
+    std::string acess_tokens_data =
+        fetchAccessTokens(post_url, content_type, client_id, client_secret,
+                          access_code, redirect_uri);
+
+    // parse and store the json
+    json jsonResponse = json::parse(acess_tokens_data);
+
+    std::cout << "Access Token: " << jsonResponse["access_token"]
+              << "\nRefresh Token: " << jsonResponse["refresh_token"]
+              << "\nScope: " << jsonResponse["scope"]
+              << "\nExpires in: " << jsonResponse["expires_in"] << "seconds"
+              << std::endl;
+    processJsonData(jsonResponse);
   }
-
-  file << storedData.dump(4);
-  file.close();
 
   // setting up mechanism to refresh access token 5 minutes before it expires
   // (this will be in the code to access the api, check if time is still
@@ -121,80 +171,3 @@ int main() {
   // then if now is less than or equal to 10 minutes away from time of expiry,
   // refresh the token
 }
-
-// using json = nlohmann::json; //
-//
-// size_t WriteCallback(void *contents, size_t size, size_t nmemb,
-//                      std::string *output) {
-//   output->append((char *)contents, size * nmemb);
-//   return size * nmemb;
-// }
-//
-// void getYouTubePlaylists(const std::string &accessToken) {
-//   CURL *curl;
-//   CURLcode res;
-//   std::string responseString;
-//
-//   curl = curl_easy_init();
-//   if (curl) {
-//     std::string url = "https://www.googleapis.com/youtube/v3/"
-//                       "playlists?part=snippet&mine=true&maxResults=10";
-//
-//     struct curl_slist *headers =
-//         NULL; // a pointer (headers) to an address holding a struct of
-//         headers
-//               // initialized to null.
-//     headers = curl_slist_append(
-//         headers,
-//         ("Authorization Bearer " + accessToken)
-//             .c_str()); // the .c_tr() is for compatibility with C-type string
-//                       // user functions like printf. It's a C++ string
-//                       method.
-//     headers = curl_slist_append(
-//         headers, "Accept: application/json"); // headers is an existing
-//                                               // curl_slist or nullptr for a
-//                                               new
-//                                               // list. The second arg is what
-//                                               is
-//                                               // to be appended. This
-//                                               curl_slist
-//                                               // is a linked list
-//                                               datastructure.
-//
-//     curl_easy_setopt(curl, CURLOPT_URL,
-//                      url.c_str()); // pass url as C-format string
-//     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); // pass headers
-//     object curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-//                      WriteCallback); // pass address to callback function
-//     curl_easy_setopt(curl, CURLOPT_WRITEDATA,
-//                      &responseString); // pass address of responseString
-//
-//     res = curl_easy_perform(curl);
-//     if (res != CURLE_OK) {
-//       std::cerr << "cURL error: " << curl_easy_strerror(res) << std::endl;
-//     } else {
-//       json jsonResponse = json::parse(responseString);
-//       std::cout << "Playlists: " << responseString << std::endl;
-//       for (const auto &item : jsonResponse["items"]) {
-//         std::cout << "- " << item["snippet"]["title"] << std::endl;
-//       }
-//     }
-//
-//     curl_easy_cleanup(curl);
-//     curl_slist_free_all(headers);
-//   }
-// }
-//
-// int main() {
-//   std::string accessToken =
-//       "ya29."
-//       "a0AXeO80RlYNnwenuw843PDV5fHlWjTxnISO1qD8CUg6NzKj9a9i64Zlw6mEBMBRl5ZPdq9C"
-//       "W6nGi6qJLjrENL38WEzOY18EpGkjpjRPbonNqOdA9NvBdzHfE9XZ_UYD2_"
-//       "SYcya9chk89LApyl1y4K48bRlnPZ4e664eFqbCEVaCgYKAasSARMSFQHGX2MiXyaPgLX2ypD"
-//       "9TRofnI4XNw0175";
-//   getYouTubePlaylists(accessToken);
-//   return 0;
-// }
-// get browser opened up with a curl request
-// get user to select gmail account and copy code from redirect to stdin
-// use code to get the refresh token and access token
