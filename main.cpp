@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <curl/curl.h>
 #include <curl/easy.h>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -14,6 +15,22 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb,
   size_t total_size = size * nmemb;
   output->append((char *)contents, total_size);
   return total_size;
+}
+
+void print_json(const json &j, const std::string &prefix = "") {
+  for (auto &[key, value] : j.items()) {
+    if (value.is_object()) {
+      std::cout << prefix << key << " (object):" << std::endl;
+      print_json(value, prefix + " ");
+    } else if (value.is_array()) {
+      std::cout << prefix << key << " (array): " << std::endl;
+      for (const auto &item : value) {
+        std::cout << prefix << " " << item << std::endl;
+      }
+    } else {
+      std::cout << prefix << key << ": " << value << std::endl;
+    }
+  }
 }
 
 std::time_t getExpiryTime(int secondsTillExpiry) {
@@ -112,7 +129,6 @@ json loadStoredData(std::string fileName) {
     std::cerr << "Error opening file for reading!" << std::endl;
     return 1;
   }
-
   json data;
   file >> data;
   file.close();
@@ -197,11 +213,11 @@ int processJsonData(json jsonResponse) {
   return storeFetchedData(jsonData);
 }
 
-std::string getPlayLists(std::string access_token) {
+void getPlayLists(std::string access_token, std::string *resource_base_url,
+                  std::string *get_data, json *collected_data,
+                  int page_no = 1) {
   // code goes here
-  std::string base_url = "https://www.googleapis.com/youtube/v3/playlists?";
-  std::string get_data = "part=snippet&mine=true&maxResult=10";
-  std::string request_url = base_url + get_data;
+  std::string request_url = *resource_base_url + "playlists" + *get_data;
   struct curl_slist *headers = NULL;
   headers = curl_slist_append(
       headers, ("Authorization: Bearer " + access_token).c_str());
@@ -224,8 +240,94 @@ std::string getPlayLists(std::string access_token) {
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
+
+  // now move on to get the next pages.. jsonize response for next page token
+  // and fetch that till there ain't such a token
+  // std::cout << response_data << std::endl;
+  // pass the response_data and use an if statement to determine if to run the
+  // function again on the next page token
+  json parsedData = json::parse(response_data);
+  std::string current_page = "Page ";
+  if (parsedData.contains("nextPageToken") &&
+      !parsedData["nextPageToken"].is_null()) {
+    std::cout << "Getting more results .." << std::endl;
+    // add current page to collected_data
+
+    (*collected_data)[current_page + std::to_string(page_no)] = parsedData;
+    *get_data += "&pageToken=" + std::string(parsedData["nextPageToken"]) +
+                 "&response_type=video";
+    return getPlayLists(access_token, resource_base_url, get_data,
+                        collected_data, page_no + 1);
+  }
+  std::cout << "Just fetched the last page, backtracking.." << std::endl;
+  // return parsedData;
+}
+
+json getPlaylistItems(std::string access_token, std::string *resource_base_url,
+                      std::string *get_data, std::string playlistId) {
+  // Make a local copy of get_data to ensure a clean query string in each call
+  std::string local_get_data = *get_data + "&playlistId=" + playlistId;
+
+  std::string request_url =
+      *resource_base_url + "playlistItems" + local_get_data;
+  json playlistItems;
+
+  struct curl_slist *headers = NULL;
+  headers = curl_slist_append(
+      headers, ("Authorization: Bearer " + access_token).c_str());
+  headers = curl_slist_append(headers, "Content-Type: application/json");
+
+  CURL *curl = curl_easy_init();
+  if (!curl) {
+    std::cerr << "Failed to initialize cURL" << std::endl;
+    return json();
+  }
+
+  std::string response_data;
+  curl_easy_setopt(curl, CURLOPT_URL, request_url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_data);
+  CURLcode res = curl_easy_perform(curl);
+
+  if (res != CURLE_OK) {
+    std::cerr << "Curl execution returned errors!" << std::endl;
+  } else {
+    std::cout << "Curl Exec Successful " << std::endl;
+  }
+
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+
+  std::cout << "Reached this point !!! " << std::endl;
   std::cout << response_data << std::endl;
-  return response_data;
+
+  try {
+    playlistItems = json::parse(response_data);
+  } catch (const std::exception &e) {
+    std::cerr << "JSON parsing failed: " << e.what() << std::endl;
+    return json();
+  }
+
+  // If there's a nextPageToken, fetch the next page
+  if (playlistItems.contains("nextPageToken") &&
+      !playlistItems["nextPageToken"].is_null()) {
+    std::cout << "Getting more results .." << std::endl;
+    std::cout << "Next Page Token: " << playlistItems["nextPageToken"]
+              << std::endl;
+
+    // Create a new clean query string for the next page request
+    std::string next_get_data =
+        *get_data + "&playlistId=" + playlistId +
+        "&pageToken=" + playlistItems["nextPageToken"].get<std::string>();
+
+    return getPlaylistItems(access_token, resource_base_url, &next_get_data,
+                            playlistId);
+  }
+
+  std::cout << "Just fetched the last page, backtracking.." << std::endl;
+  print_json(playlistItems);
+  return playlistItems;
 }
 
 int main() {
@@ -245,7 +347,6 @@ int main() {
     // load from memory the access_token and refresh_token and expiry time
     std::cout << "Trying to retrive stored data" << std::endl;
     accessTokens = loadStoredData(storedDataFile);
-    std::cout << "Stored Data" << accessTokens << std::endl;
     expiry_time = accessTokens["expiry_time"];
     // check if access_token is expired
     // if it is, refresh it then move on to use it, if not, move on to use it.
@@ -266,7 +367,7 @@ int main() {
     processJsonData(accessTokens);
     expiry_time = getExpiryTime(accessTokens["expires_in"]);
   }
-  std::cout << "Reached this point " << std::endl;
+
   // calculate expiry_time
 
   if (itIsResetTime(expiry_time)) {
@@ -277,12 +378,77 @@ int main() {
     std::cout << "New Access Tokens:\n" << accessTokens << std::endl;
   } else {
     std::cout << "Carry on, not refresh time yet" << std::endl;
-    getPlayLists(accessTokens["access_token"]);
   }
-  // setting up mechanism to refresh access token 5 minutes before it expires
+  // getting playlists
+  std::string resource_base_url = "https://www.googleapis.com/youtube/v3/";
+  std::string get_data = "?part=snippet&mine=true&maxResult=10";
+  json playlist_data;
+  getPlayLists(accessTokens["access_token"], &resource_base_url, &get_data,
+               &playlist_data);
+  // print_json(playlist_data);
+  json processedPlayListData;
+  // getting playlist times
+  std::string current_title;
+  json currentSnippet;
+  for (auto &[key, value] : playlist_data.items()) { // get each page object
+    for (auto &playlistObject : value["items"]) { // get each object in the item
+                                                  // key of each page object
+      try {
+        // create object for each, fill with required keys and values
+        currentSnippet = playlistObject["snippet"];
+        current_title = currentSnippet["title"];
+        std::cout << current_title << std::endl;
+        processedPlayListData[current_title] = {
+            {"playlistId", playlistObject["id"]},
+            {"description", currentSnippet["description"]},
+            {"creationDate", currentSnippet["publishedAt"]}};
+
+        std::cout << std::endl;
+        std::cout << std::endl;
+      } catch (const std::exception &e) {
+        std::cout << "Handling exception:  " << e.what() << std::endl;
+        throw;
+      }
+    }
+  }
+
+  print_json(processedPlayListData);
+
+  // getting the items in each playlist.
+  get_data = "?part=snippet&maxResults=10&key=";
+  for (auto &[key, value] : processedPlayListData.items()) {
+    // std::cout << value << std::endl;
+    getPlaylistItems(accessTokens["access_token"], &resource_base_url,
+                     &get_data, value["playlistId"]);
+  }
+  // setting up mechanism to refresh access token 5 to 10 minutes before expiry
   // (this will be in the code to access the api, check if time is still
   // sufficient, if so, carry on, if not, refresh token) refresh token code get
   // the time when the token will expire and keep checking how far now is from
   // then if now is less than or equal to 10 minutes away from time of expiry,
   // refresh the token
+  // after getting playlist data ;
+  // make sure you have received or playlists. have a means to visit all
+  // available pages to ensure this. parse the data to fit some useable format;
+  // (see Pagination at youtube api docs) get the name of each list, the
+  // description and the contents of the list. for each of the contents, a json
+  // object with the title and the artist for a song... so we need a means to
+  // tell if some media is a song or not. after cleaning the json.. move on to
+  // do all you have done here for the spotify api after that implement search
+  // functionality for both spotify and youtube api get some means to get a
+  // match for every song in the spotify lists on youtube and vice versa move on
+  // to based on the data from the previous step create playlists on the other
+  // platform with the same names as was on source names, descriptions, songs...
+  // add subscription transfer to your system..  *find ways to get only artist
+  // subscriptions etc etc.
 }
+
+/**
+
+ [clang] (typecheck_bool_condition) Value of type 'iterator' (aka
+ 'iter_impl<nlohmann::basic_json<std::map, std::vector, std::basic_string<char>,
+ bool, long, unsigned long, double, std::allocator, nlohmann::adl_serializer,
+ std::vector<unsigned char, std::allocator<unsigned char>>, void>>') is not
+ contextually convertible to 'bool'
+
+ **/
