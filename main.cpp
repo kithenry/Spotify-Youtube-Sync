@@ -10,6 +10,7 @@
 
 using json = nlohmann::json;
 
+// curl utility function here
 size_t WriteCallback(void *contents, size_t size, size_t nmemb,
                      std::string *output) {
   size_t total_size = size * nmemb;
@@ -17,6 +18,7 @@ size_t WriteCallback(void *contents, size_t size, size_t nmemb,
   return total_size;
 }
 
+// utility function here
 void print_json(const json &j, const std::string &prefix = "") {
   for (auto &[key, value] : j.items()) {
     if (value.is_object()) {
@@ -33,6 +35,7 @@ void print_json(const json &j, const std::string &prefix = "") {
   }
 }
 
+// authentication and token refresh
 std::time_t getExpiryTime(int secondsTillExpiry) {
   std::time_t now = std::chrono::system_clock::to_time_t(
       std::chrono::system_clock::now()); // epoch style time
@@ -40,6 +43,7 @@ std::time_t getExpiryTime(int secondsTillExpiry) {
   return expiry_time;
 }
 
+// file management (I/O)
 bool fileExists(const std::string &filename) {
   std::ifstream file(filename);
   return file.good(); // Returns true if file exists
@@ -50,6 +54,7 @@ bool fileIsEmpty(const std::string &filename) {
   return file.tellg() == 0; // Check if position is 0 (empty file)
 }
 
+// file management (I/O)
 int storeFetchedData(json dataToStore) {
   std::ofstream file("storedData.json");
 
@@ -63,6 +68,7 @@ int storeFetchedData(json dataToStore) {
   return 0;
 }
 
+// authentication and token refresh
 bool itIsResetTime(int epochExpiryTime) {
   time_t now =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -84,6 +90,7 @@ bool itIsResetTime(int epochExpiryTime) {
   }
 }
 
+// authentication and token refresh
 void refreshAccessToken(std::string client_id, std::string client_secret,
                         std::string post_url, json *accessTokens) {
   // for getting new access token
@@ -122,6 +129,7 @@ void refreshAccessToken(std::string client_id, std::string client_secret,
   storeFetchedData(*accessTokens);
 }
 
+// file management and (I/O)
 json loadStoredData(std::string fileName) {
   // for accessing stored tokens and expiry time if any
   std::ifstream file(fileName);
@@ -136,6 +144,7 @@ json loadStoredData(std::string fileName) {
   return data;
 }
 
+// authentication
 std::string fetchAccessCode(std::string client_id, std::string base_url,
                             std::string redirect_uri, std::string scope) {
   // for getting access code
@@ -161,6 +170,7 @@ std::string fetchAccessCode(std::string client_id, std::string base_url,
   return access_code;
 }
 
+// authentication
 std::string fetchAccessTokens(std::string post_url, std::string content_type,
                               std::string client_id, std::string client_secret,
                               std::string access_code,
@@ -197,6 +207,7 @@ std::string fetchAccessTokens(std::string post_url, std::string content_type,
   return response_data;
 }
 
+// response processing
 int processJsonData(json jsonResponse) {
   std::string access_token = jsonResponse["access_token"];
   std::string refresh_token = jsonResponse["refresh_token"];
@@ -213,6 +224,7 @@ int processJsonData(json jsonResponse) {
   return storeFetchedData(jsonData);
 }
 
+// curl requests
 void getPlayLists(std::string access_token, std::string *resource_base_url,
                   std::string *get_data, json *collected_data,
                   int page_no = 1) {
@@ -263,6 +275,7 @@ void getPlayLists(std::string access_token, std::string *resource_base_url,
   // return parsedData;
 }
 
+// curl requests
 json getPlaylistItems(std::string access_token, std::string *resource_base_url,
                       std::string *get_data, std::string playlistId) {
   // Make a local copy of get_data to ensure a clean query string in each call
@@ -433,7 +446,18 @@ int main() {
   // (see Pagination at youtube api docs) get the name of each list, the
   // description and the contents of the list. for each of the contents, a json
   // object with the title and the artist for a song... so we need a means to
-  // tell if some media is a song or not. after cleaning the json.. move on to
+  // tell if some media is a song or not.
+  // access user subscriptions
+  // add music search function with mod to get best result.
+  // parse music info from youtube description (supplied to youtube by bla bla
+  // bla) modularise the code; functions for handling curl, authentication,
+  // handling json parsing, handling json printing. (follow GPT recommendation)
+  // - api client base class
+  // - youtubeclient & spotify client derived class
+  // - playlist manager (searching , creating, syncing playlists across
+  // platforms)
+  // - utility functions (json parsing, string handling, file access)
+  // after cleaning the json.. move on to
   // do all you have done here for the spotify api after that implement search
   // functionality for both spotify and youtube api get some means to get a
   // match for every song in the spotify lists on youtube and vice versa move on
@@ -441,6 +465,133 @@ int main() {
   // platform with the same names as was on source names, descriptions, songs...
   // add subscription transfer to your system..  *find ways to get only artist
   // subscriptions etc etc.
+  // giving the code structure;
+  // apply classes
+  // seperate code into multiple files
+  // define functions that will be used by any platform that will be added to
+  // the code base
+  /*
+   Y our to-do list is already well-structured, but breaking it down further
+   will he*lp clarify responsibilities, ensure modularity, and make
+   implementation smoother. Here’s a refined version with more details:
+
+   ---
+
+   ### **1. API Client Base Class (`ApiClient`)**
+   **Purpose:**
+   A reusable base class that provides core functionality for making HTTP
+   requests.
+
+   **Breakdown:**
+   ✅ **Member Variables**
+   - `std::string access_token` (stores the auth token)
+   - `std::string base_url` (stores the API base URL)
+
+   ✅ **Core Methods**
+   - `std::string makeRequest(std::string endpoint, std::string method = "GET",
+   std::string postData = "");`
+   - Handles cURL setup, request execution, and response handling.
+   - `void setAccessToken(std::string token);`
+   - Updates the token when refreshing authentication.
+
+   ✅ **Considerations:**
+   - Error handling for failed API calls.
+   - Rate limiting strategies (if needed).
+
+   ---
+
+   ### **2. YouTube & Spotify API Clients (`YouTubeClient` & `SpotifyClient`)**
+   **Purpose:**
+   Extend `ApiClient` to interact with YouTube and Spotify.
+
+   **Breakdown:**
+   ✅ **`YouTubeClient`**
+   - `json getPlaylists();` → Fetch all user playlists.
+   - `json getPlaylistItems(std::string playlistId);` → Fetch items in a
+   playlist.
+   - `json searchSong(std::string query);` → Search for songs.
+   - `json createPlaylist(std::string name, std::string description);` → Create
+   a playlist.
+   - `bool addSongToPlaylist(std::string playlistId, std::string songId);` → Add
+   a song to a playlist.
+
+   ✅ **`SpotifyClient`**
+   - `json getPlaylists();`
+   - `json getPlaylistItems(std::string playlistId);`
+   - `json searchSong(std::string query);`
+   - `json createPlaylist(std::string name, std::string description);`
+   - `bool addSongToPlaylist(std::string playlistId, std::string songId);`
+
+   ✅ **Considerations:**
+   - YouTube uses video IDs, while Spotify uses track IDs.
+   - OAuth token handling may differ slightly.
+
+   ---
+
+   ### **3. Playlist Manager (`PlaylistManager`)**
+   **Purpose:**
+   Handles cross-platform playlist management.
+
+   **Breakdown:**
+   ✅ **Fetching & Storing Playlists**
+   - `void loadPlaylists();`
+   - Fetches and stores playlists from YouTube & Spotify.
+
+   ✅ **Searching for Songs**
+   - `json search(std::string query, std::string platform);`
+   - Calls either `YouTubeClient::searchSong` or `SpotifyClient::searchSong`.
+
+   ✅ **Syncing Playlists**
+   - `bool syncPlaylist(std::string sourcePlatform, std::string destPlatform,
+   std::string playlistId);`
+   - Fetches songs from one platform, searches them on the other, and adds them
+   to a new/existing playlist.
+
+   ✅ **Exporting Playlists**
+   - `void saveToFile(std::string filename, json data);`
+   - Saves playlist info in JSON or CSV.
+
+   ✅ **Considerations:**
+   - **Matching songs across platforms** (some may not be available).
+   - **Handling missing metadata** (some info may be incomplete).
+
+   ---
+
+   ### **4. Utility Functions (`Utils`)**
+   **Purpose:**
+   Provide helper functions for various tasks.
+
+   **Breakdown:**
+   ✅ **JSON Handling**
+   - `json parseJson(std::string jsonString);`
+   - `std::string jsonToString(json data);`
+
+   ✅ **String Handling**
+   - `std::string toLowerCase(std::string str);`
+   - `std::string trim(std::string str);`
+
+   ✅ **File Access**
+   - `bool writeToFile(std::string filename, std::string content);`
+   - `std::string readFromFile(std::string filename);`
+
+   ✅ **Considerations:**
+   - Logging system for debugging.
+   - Error handling for missing files.
+
+   ---
+
+   ### **5. After Cleaning JSON, Next Steps**
+   After ensuring JSON is clean and structured properly:
+   ✅ **Test API client classes independently**
+   ✅ **Implement search & playlist functions**
+   ✅ **Write tests for cross-platform syncing**
+   ✅ **Document API endpoints & how functions work**
+
+   ---
+
+   This structure will keep your code modular and scalable for future
+   integrations. 🚀
+   */
 }
 
 /**
